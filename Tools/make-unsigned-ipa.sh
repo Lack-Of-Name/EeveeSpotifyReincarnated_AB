@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Convert an injected IPA into an "unsigned" IPA: no Apple code signature,
-# no provisioning profile. Every Mach-O is pseudo-signed with `ldid -S`
-# (an empty signature, no developer certificate) and bundle _CodeSignature
-# directories / CodeResources are removed.
+# no provisioning profile. Bundle _CodeSignature directories / CodeResources
+# are removed, and Mach-Os are pseudo-signed with `ldid -S` where possible.
 #
 # This is exactly the input LiveContainer wants: it re-signs the guest with
-# its own certificate at install/launch, so an ldid pseudo-signature is fine.
+# its own certificate at install/launch, so any leftover Apple signature is
+# irrelevant, and ldid failures are non-fatal (see below).
 # Combine with Tools/strip-ipa.sh (removes appex/Watch, which LiveContainer
 # cannot host) before calling this script — see build-unsigned-ipa.yml.
 #
@@ -40,14 +40,20 @@ APP="$(find "$WORK/Payload" -maxdepth 2 -name '*.app' -type d | head -1)"
 EXECUTABLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist" 2>/dev/null || true)"
 [ -n "$EXECUTABLE" ] || EXECUTABLE="$(basename "$APP" .app)"
 
-# Drop Apple's signature material from every bundle in the payload.
+# Drop bundle-level signature material. The actual code signature blob lives
+# inside each Mach-O, but LiveContainer replaces it when it re-signs the guest.
 find "$WORK/Payload" -type d -name '_CodeSignature' -prune -exec rm -rf {} + 2>/dev/null || true
 find "$WORK/Payload" -type f -name 'CodeResources' -delete 2>/dev/null || true
 
-# Pseudo-sign every Mach-O. `ldid -S` writes an empty CodeDirectory, i.e. a
-# signature with no Apple certificate. Applied to the app binary, injected
-# dylibs and embedded frameworks alike.
+# Enumerate files into a regular file first. The previous process-substitution
+# loop died on the first ldid error and left `find` with a broken pipe, which
+# turned one harmless warning into a failed workflow step.
+FILE_LIST="$WORK/payload-files.null"
+find "$WORK/Payload" -type f -print0 > "$FILE_LIST"
+
 SIGNED=0
+FAILED=0
+MACHOS=0
 while IFS= read -r -d '' macho; do
     # Capture first (pipefail + grep -q can otherwise produce a false SIGPIPE).
     kind="$(file -b "$macho" || true)"
@@ -55,19 +61,33 @@ while IFS= read -r -d '' macho; do
         *Mach-O*) ;;
         *) continue ;;
     esac
+    MACHOS=$((MACHOS + 1))
 
+    # ldid asserts ("end >= size - 0x10") on some stock Mach-Os whose symbol
+    # table ends exactly at EOF. That is a known ldid limitation, not a broken
+    # IPA. LiveContainer re-signs on launch, so log and keep going.
     if [ -n "$ENTITLEMENTS" ] && [ "$macho" = "$APP/$EXECUTABLE" ]; then
-        ldid -S"$ENTITLEMENTS" "$macho"
+        if ldid -S"$ENTITLEMENTS" "$macho" >/dev/null 2>&1; then
+            SIGNED=$((SIGNED + 1))
+        else
+            FAILED=$((FAILED + 1))
+            echo "warning: ldid could not pseudo-sign main executable $macho (LiveContainer will re-sign)"
+        fi
     else
-        ldid -S "$macho"
+        if ldid -S "$macho" >/dev/null 2>&1; then
+            SIGNED=$((SIGNED + 1))
+        else
+            FAILED=$((FAILED + 1))
+            echo "warning: ldid could not pseudo-sign $macho (LiveContainer will re-sign)"
+        fi
     fi
-    SIGNED=$((SIGNED + 1))
-done < <(find "$WORK/Payload" -type f -print0)
+done < "$FILE_LIST"
 
-[ "$SIGNED" -gt 0 ] || { echo "no Mach-O binaries found to pseudo-sign" >&2; exit 1; }
+[ "$MACHOS" -gt 0 ] || { echo "no Mach-O binaries found under Payload/" >&2; exit 1; }
+echo "pseudo-signed $SIGNED/$MACHOS Mach-O files ($FAILED skipped; LiveContainer re-signs those)."
 
 # Rebuild the archive from scratch (zip -u does not drop removed entries).
 rm -f "$IPA_ABS"
 ( cd "$WORK" && zip -qry "$IPA_ABS" Payload )
 
-echo "unsigned IPA ready: $IPA_ABS (pseudo-signed $SIGNED Mach-O files)"
+echo "unsigned IPA ready: $IPA_ABS"
