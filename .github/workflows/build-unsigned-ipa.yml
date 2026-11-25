@@ -105,13 +105,43 @@ jobs:
 
       - name: Download vanilla IPA
         run: |
+          set -o pipefail
           IPA="$RUNNER_TEMP/spotify.ipa"
-          wget "${{ inputs.ipa_url }}" --no-verbose -O "$IPA"
+          URL="${{ inputs.ipa_url }}"
+          echo "Downloading IPA from: ${URL}"
+
+          # curl is more tolerant of hosts that reject wget's default UA.
+          # -L follows redirects (Dropbox/filebin use them), -w gives us the
+          # status even when the host answers with an HTML error page.
+          STATUS=$(curl -sS -L --retry 3 --retry-delay 5 \
+              --connect-timeout 30 --max-time 1800 \
+              -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Version/17.0 Safari/605.1.15' \
+              -o "$IPA" -w '%{http_code}' "$URL") || STATUS="000"
+
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::IPA download failed (HTTP $STATUS)."
+            echo "::error::Check that the link is a DIRECT download and still alive. Filebin bins expire after inactivity — re-upload and paste a fresh URL. Filenames with spaces/brackets can also cause 403s; rename the file to something simple like Spotify.ipa before uploading."
+            [ -s "$IPA" ] && head -c 500 "$IPA" || true
+            exit 1
+          fi
+
+          SIZE=$(stat -f%z "$IPA" 2>/dev/null || stat -c%s "$IPA" 2>/dev/null || echo 0)
+          if [ "$SIZE" -lt 10000000 ]; then
+            echo "::error::Downloaded file is only ${SIZE} bytes — likely an HTML error page, not an IPA."
+            head -c 500 "$IPA" || true
+            exit 1
+          fi
+
           file_type=$(file --mime-type -b "$IPA")
           if [[ "$file_type" != "application/x-ios-app" && "$file_type" != "application/zip" ]]; then
             echo "::error::Not a valid IPA: $file_type"
             exit 1
           fi
+          if ! unzip -tq "$IPA" >/dev/null 2>&1; then
+            echo "::error::IPA failed zip integrity check"
+            exit 1
+          fi
+          echo "Downloaded $((SIZE / 1024 / 1024)) MB IPA."
           echo "VANILLA_IPA=$IPA" >> $GITHUB_ENV
 
       - name: Build zxPluginsInject.dylib
