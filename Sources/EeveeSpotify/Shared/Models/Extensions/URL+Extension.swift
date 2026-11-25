@@ -148,7 +148,12 @@ extension URL {
            path.contains("/upgrade-component/") ||
            path.contains("/marketing/") ||
            path.contains("/home-ads/") ||
-           path.contains("/search-ads/") {
+           path.contains("/search-ads/") ||
+           path.contains("/ad-break") ||
+           path.contains("/ad-insertion") ||
+           path.contains("/ad-consumption") ||
+           path.contains("/ad-playback") ||
+           path.contains("/ad-logic") {
             return true
         }
         

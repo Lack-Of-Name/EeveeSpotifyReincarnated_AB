@@ -39,6 +39,21 @@ This tweak makes Spotify think you have a Premium subscription, granting free li
   </ol>
 </details>
 
+### Build an unsigned IPA for LiveContainer
+The **Build Unsigned IPA (LiveContainer)** workflow compiles the tweak from source and injects it into a decrypted Spotify IPA, then removes all Apple code signatures (`_CodeSignature` / `CodeResources`) and pseudo-signs every Mach-O with `ldid -S`. Watch bundles and all native app extensions are stripped because LiveContainer cannot host them. The tweak is **directly injected**, which is the installation method LiveContainer recommends.
+
+1. Enable **Read and Write** permissions for Actions in your fork (Repository Settings → Actions).
+2. Open **Actions → Build Unsigned IPA (LiveContainer) → Run workflow**.
+3. Paste a **direct download URL** to a decrypted Spotify IPA (we cannot provide one).
+4. Keep **zxPluginsInject** enabled — it rebinds Spotify's hard-coded keychain access group to the group LiveContainer actually grants the guest. Choose where to upload the result (artifact, filebin, or both).
+5. Download `EeveeSpotify-<version>-<spotify-version>-unsigned.ipa` and install it with **LiveContainer → + → IPA files**. No Tweaks-tab setup is needed.
+6. If guest apps misbehave, check the app's settings in LiveContainer (**Fix File Picker** / **Fix Local Notifications**), and make sure JIT or JIT-less signing is set up correctly.
+
+An optional **TweakLoader** artifact (`EeveeSpotify-LiveContainer-Tweaks`) contains `EeveeSpotify.dylib`, `EeveeSwiftProtobuf.framework` and `zxPluginsInject.dylib` for people who prefer loading the tweak from LiveContainer's Tweaks tab. Import each item there and select the app-specific Tweak Folder. Direct injection remains the recommended path.
+
+### Ad blocking
+In addition to the existing ad-service kills, HUB component stripping and blocked ad endpoints, the **Ad Skipper** watches the player state and skips an ad immediately if one still reaches playback — using the player's ad/next-track API with a seek-to-end fallback. Real tracks are never affected: skipping only triggers for tracks that explicitly identify themselves as an ad. A second in-stream defence cancels Spotify core-session ad responses *and* ad data chunks so ad breaks never materialize.
+
 ## The History
 
 In January 2024, Spotilife, the only tweak to get Spotify Premium, stopped working on new Spotify versions. [whoeevee](https://github.com/whoeevee) decompiled Spotilife, reverse-engineered Spotify, intercepted requests, etc., and created EeveeSpotify.

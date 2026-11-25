@@ -34,6 +34,12 @@ require(url("https://aet.spotify.com/v2/t").isAdRelated,
         "aet.spotify.com/v2/t ad telemetry endpoint must be blocked")
 require(url("https://aet.spotify.com/v1/events").isAdRelated,
         "aet.spotify.com ad telemetry host must be blocked")
+require(url("https://spclient.wg.spotify.com/ad-break/v1/insertion").isAdRelated,
+        "ad-break insertion endpoint must be blocked")
+require(url("https://spclient.wg.spotify.com/ad-inventory/v1/fetch").isAdRelated,
+        "ad-inventory endpoint must be blocked")
+require(!url("https://spclient.wg.spotify.com/advisor/v1/recommendations").isAdRelated,
+        "non-ad paths that merely start with 'ad' must not be blocked")
 
 // ClientMessagingPlatform message fetches (9.1.84 win-back fullscreen, Home
 // Premium banner). The RPC set was renamed from FetchMessageList to

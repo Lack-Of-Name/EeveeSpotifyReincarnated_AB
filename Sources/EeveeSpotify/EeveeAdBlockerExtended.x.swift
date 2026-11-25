@@ -38,6 +38,7 @@ struct EmbeddedPlaylistServiceGroup: HookGroup {}
 struct NativeAdsElementServiceGroup: HookGroup {}
 struct OnDemandAdEventLoggerServiceGroup: HookGroup {}
 struct CoreURLSessionAdsGroup: HookGroup {}
+struct CoreURLSessionAdsDataGroup: HookGroup {}
 
 private let killAdsServiceImpl         = true
 private let killInStreamAdsService     = true
@@ -492,6 +493,27 @@ class CoreURLSessionAdsKill: ClassHook<NSObject> {
     }
 }
 
+// Second line of defence: if an ad response was already accepted before the
+// hook attached (or came from a path not matched at response time), cancel the
+// task as soon as ad bytes arrive so the break never materializes.
+class CoreURLSessionAdsDataKill: ClassHook<NSObject> {
+    typealias Group = CoreURLSessionAdsDataGroup
+    static let targetName = "SPTCoreURLSessionDataDelegate"
+
+    func URLSession(
+        _ session: URLSession,
+        dataTask task: URLSessionDataTask,
+        didReceiveData data: Data
+    ) {
+        if let url = task.currentRequest?.url ?? task.originalRequest?.url, url.isAdRelated {
+            adlog("core data \(url.host ?? "?")\(url.path)")
+            task.cancel()
+            return
+        }
+        orig.URLSession(session, dataTask: task, didReceiveData: data)
+    }
+}
+
 func activateEeveeAdBlockerExtended() {
     let loadSelector = Selector(("load"))
     let initSelector = Selector(("init"))
@@ -617,5 +639,15 @@ func activateEeveeAdBlockerExtended() {
         ablog("SPTCoreURLSessionDataDelegate unavailable; skipping")
     }
 
-    ablog("activated \(activated)/\(loadTargets.count + 8) compatible extended hooks")
+    let dataSelector = Selector(("URLSession:dataTask:didReceiveData:"))
+    if let cls = findTweakClass(CoreURLSessionAdsDataKill.targetName),
+       class_getInstanceMethod(cls, dataSelector) != nil {
+        CoreURLSessionAdsDataGroup().activate()
+        activated += 1
+        ablog("SPTCoreURLSessionDataDelegate ad-data block activated")
+    } else {
+        ablog("SPTCoreURLSessionDataDelegate didReceiveData unavailable; skipping")
+    }
+
+    ablog("activated \(activated)/\(loadTargets.count + 9) compatible extended hooks")
 }
