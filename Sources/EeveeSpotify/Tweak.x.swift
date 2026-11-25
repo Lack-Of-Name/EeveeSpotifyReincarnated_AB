@@ -245,6 +245,7 @@ struct EeveeSpotify: Tweak {
 
         activateEeveeCrossfadeForce()
         activateEeveeAdBlockerExtended()
+        activateAdSkipper()
         activateUpsellPopupBlocker()
         activateUpsellServiceBlocker()
         activateClientMessagingPlatformBlocker()

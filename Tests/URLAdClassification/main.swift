@@ -19,6 +19,16 @@ require(url("https://doubleclick.net/v1/content").isAdRelated,
 require(!url("https://spclient.wg.spotify.com/collection/v1/library/items").isAdRelated,
         "ordinary library endpoint must not be blocked")
 
+// In-stream ad-break endpoints served by the player core.
+require(url("https://spclient.wg.spotify.com/ad-logic/v3/config").isAdRelated,
+        "ad-logic config endpoint must be blocked")
+require(url("https://spclient.wg.spotify.com/ad-break/v1/insertion").isAdRelated,
+        "ad-break insertion endpoint must be blocked")
+require(url("https://spclient.wg.spotify.com/dac/view/v1/ad").isAdRelated,
+        "display ad container endpoint must be blocked")
+require(!url("https://spclient.wg.spotify.com/advisor/v1/recommendations").isAdRelated,
+        "non-ad paths that merely start with 'ad' must not be blocked")
+
 // ClientMessagingPlatform message fetches (9.1.84 win-back fullscreen, Home
 // Premium banner). The RPC set was renamed from FetchMessageList to
 // FetchMessage / FetchMessageForPreview; all must stay blocked.

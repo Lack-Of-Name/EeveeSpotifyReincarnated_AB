@@ -26,6 +26,7 @@ struct ScrollFeedAdViewGroup: HookGroup {}
 struct ScrollFeedAdServiceGroup: HookGroup {}
 struct ScrollFeedAdControllerGroup: HookGroup {}
 struct CoreURLSessionAdsGroup: HookGroup {}
+struct CoreURLSessionAdsDataGroup: HookGroup {}
 
 private let killAdsServiceImpl         = true
 private let killInStreamAdsService     = true
@@ -344,7 +345,18 @@ private func isCoreAdRequest(_ url: URL) -> Bool {
     let host = (url.host ?? "").lowercased()
     guard host.contains("spotify") || host.contains("spclient") else { return false }
     let path = url.path.lowercased()
-    return path.contains("/ads/") || path.hasSuffix("/ads") || path.contains("/ad-logic/")
+
+    if path.contains("/ads/") || path.hasSuffix("/ads") { return true }
+    if path.contains("/ad-logic") { return true }
+    if path.contains("/ad-inventory") || path.contains("/ad-slot") { return true }
+    if path.contains("/dac/view/") { return true }
+    if path.contains("ad-on-app-open") || path.contains("ad-break") || path.contains("ad-insertion") {
+        return true
+    }
+    if path.contains("/esperanto/") && (path.contains("ad") || path.contains("slot")) {
+        return true
+    }
+    return false
 }
 
 class CoreURLSessionAdsKill: ClassHook<NSObject> {
@@ -363,6 +375,27 @@ class CoreURLSessionAdsKill: ClassHook<NSObject> {
             return
         }
         orig.URLSession(session, dataTask: task, didReceiveResponse: response, completionHandler: handler)
+    }
+}
+
+// Second line of defence: if an ad response was already accepted before the
+// hook attached (or arrived from a path not matched at response time), cancel
+// the task as soon as ad bytes arrive so the break never materializes.
+class CoreURLSessionAdsDataKill: ClassHook<NSObject> {
+    typealias Group = CoreURLSessionAdsDataGroup
+    static let targetName = "SPTCoreURLSessionDataDelegate"
+
+    func URLSession(
+        _ session: URLSession,
+        dataTask task: URLSessionDataTask,
+        didReceiveData data: Data
+    ) {
+        if let url = task.currentRequest?.url ?? task.originalRequest?.url, isCoreAdRequest(url) {
+            adlog("core data \(url.host ?? "?")\(url.path)")
+            task.cancel()
+            return
+        }
+        orig.URLSession(session, dataTask: task, didReceiveData: data)
     }
 }
 
@@ -476,8 +509,18 @@ func activateEeveeAdBlockerExtended() {
         activated += 1
         ablog("SPTCoreURLSessionDataDelegate ad-request block activated")
     } else {
-        ablog("SPTCoreURLSessionDataDelegate unavailable; skipping")
+        ablog("SPTCoreURLSessionDataDelegate didReceiveResponse unavailable; skipping")
     }
 
-    ablog("activated \(activated)/\(loadTargets.count + 8) compatible extended hooks")
+    let dataSelector = Selector(("URLSession:dataTask:didReceiveData:"))
+    if let cls = findTweakClass(CoreURLSessionAdsDataKill.targetName),
+       class_getInstanceMethod(cls, dataSelector) != nil {
+        CoreURLSessionAdsDataGroup().activate()
+        activated += 1
+        ablog("SPTCoreURLSessionDataDelegate ad-data block activated")
+    } else {
+        ablog("SPTCoreURLSessionDataDelegate didReceiveData unavailable; skipping")
+    }
+
+    ablog("activated \(activated)/\(loadTargets.count + 9) compatible extended hooks")
 }
